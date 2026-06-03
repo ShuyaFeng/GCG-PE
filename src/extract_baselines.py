@@ -82,15 +82,16 @@ METHODS = {"direct": _direct, "completion": _completion,
 def run_baselines(model, tok, model_name: str, seed: int,
                   individuals: List[Dict[str, Any]], fields: List[str],
                   cfg: Dict[str, Any], store: ResultsStore,
-                  device: str = "cuda") -> None:
-    from .data_gen import FIELD_LABELS  # noqa: F401  (kept for parity)
-
+                  device: str = "cuda", done: set | None = None) -> None:
+    done = done or set()
     k = cfg["extract"]["baseline"]["variations_per_method"]
     max_new = cfg["extract"]["max_new_tokens"]
     for ind in individuals:
         for field in fields:
             value = ind[field]
             for mname, gen in METHODS.items():
+                if (model_name, seed, ind["id"], field, mname) in done:
+                    continue  # resumable: already logged
                 t0 = time.time()
                 prompts = gen(field, ind, k)
                 hit, bp, out = best_over_prompts(

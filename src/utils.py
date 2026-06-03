@@ -151,6 +151,22 @@ class ResultsStore:
     def attempts(self) -> List[Dict[str, Any]]:
         return self._read_jsonl(self.attempts_path)
 
+    def completed_keys(self) -> set:
+        """Set of (model, seed, individual_id, field, method) already logged.
+        Used to make extraction resumable/idempotent across chained HPC jobs."""
+        return {(a["model"], a["seed"], a["individual_id"], a["field"],
+                 a["method"]) for a in self.attempts()}
+
+    def gcg_prompts_for(self, model: str, seed: int) -> Dict[str, str]:
+        """Reconstruct {f'{ind}:{field}': optimized_prompt} from the prompt log
+        (robust to partial/resumed runs; no separate file needed)."""
+        out: Dict[str, str] = {}
+        for p in self.prompts():
+            if p.get("kind") == "gcg" and p["model"] == model \
+                    and p["seed"] == seed:
+                out[f"{p['individual_id']}:{p['field']}"] = p["prompt"]
+        return out
+
     def gcg_convergence(self) -> List[Dict[str, Any]]:
         return self._read_jsonl(self.gcg_conv_path)
 

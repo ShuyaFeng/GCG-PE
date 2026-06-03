@@ -12,7 +12,6 @@ All stages are resumable: training and extraction skip work already on disk.
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 
@@ -38,12 +37,6 @@ def data_dir_for(cfg) -> str:
     return os.path.join(cfg["output_dir"], "data")
 
 
-def opt_prompts_path(cfg, model, seed) -> str:
-    return os.path.join(ensure_dir(os.path.join(cfg["output_dir"],
-                                                 "opt_prompts")),
-                        f"{model}__seed{seed}.json")
-
-
 def stage_data(cfg) -> None:
     generate(cfg, data_dir_for(cfg))
 
@@ -58,18 +51,20 @@ def stage_extract(cfg, device) -> None:
     store = ResultsStore(cfg["output_dir"])
     inds = load_individuals(data_dir_for(cfg))
     fields = cfg["extract"]["fields"]
+    done = store.completed_keys()  # resume: skip targets logged by prior jobs
+    if done:
+        print(f"[extract] resuming: {len(done)} (model,seed,ind,field,method) "
+              "attempts already logged, will be skipped")
     for spec in cfg["models"]:
         for seed in cfg["seeds"]:
             set_seed(seed)
             model, tok = load_model_and_tokenizer(cfg, spec, seed, device)
             print(f"[extract] {spec['name']} seed{seed}: baselines")
             run_baselines(model, tok, spec["name"], seed, inds, fields, cfg,
-                          store, device)
+                          store, device, done=done)
             print(f"[extract] {spec['name']} seed{seed}: GCG")
-            opt = run_gcg(model, tok, spec["name"], seed, inds, fields, cfg,
-                          store, device)
-            with open(opt_prompts_path(cfg, spec["name"], seed), "w") as f:
-                json.dump(opt, f)
+            run_gcg(model, tok, spec["name"], seed, inds, fields, cfg,
+                    store, device, done=done)
             del model
             try:
                 import torch
@@ -85,12 +80,11 @@ def stage_transfer(cfg, device) -> None:
     specs = {s["name"]: s for s in cfg["models"]}
     for src, tgt in cfg.get("transfer", {}).get("pairs", []):
         for seed in cfg["seeds"]:
-            p = opt_prompts_path(cfg, src, seed)
-            if not os.path.exists(p):
-                print(f"[transfer] missing {p}, skipping {src}->{tgt}")
+            opt = store.gcg_prompts_for(src, seed)  # from prompt log (resumable)
+            if not opt:
+                print(f"[transfer] no GCG prompts for {src} seed{seed}, "
+                      f"skipping {src}->{tgt}")
                 continue
-            with open(p) as f:
-                opt = json.load(f)
             model, tok = load_model_and_tokenizer(cfg, specs[tgt], seed, device)
             print(f"[transfer] {src} -> {tgt} seed{seed}")
             run_transfer(model, tok, tgt, src, seed, inds, fields, opt, cfg,

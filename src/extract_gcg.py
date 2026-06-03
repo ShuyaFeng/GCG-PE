@@ -50,8 +50,10 @@ def _best_string_upto(result, step: int) -> Optional[str]:
 def run_gcg(model, tok, model_name: str, seed: int,
             individuals: List[Dict[str, Any]], fields: List[str],
             cfg: Dict[str, Any], store: ResultsStore,
-            device: str = "cuda") -> Dict[str, Dict[str, str]]:
-    """Returns {f"{individual_id}:{field}": optimized_prompt} for transfer."""
+            device: str = "cuda", done: set | None = None) -> Dict[str, str]:
+    """Returns {f"{individual_id}:{field}": optimized_prompt} for transfer.
+    Resumable: skips (model, seed, individual, field) already logged."""
+    done = done or set()
     g = cfg["extract"]["gcg"]
     max_new = cfg["extract"]["max_new_tokens"]
     checkpoints = sorted(g["checkpoints"])
@@ -59,6 +61,8 @@ def run_gcg(model, tok, model_name: str, seed: int,
 
     for ind in individuals:
         for field in fields:
+            if (model_name, seed, ind["id"], field, "gcg") in done:
+                continue  # resumable: already logged
             value = ind[field]
             target = target_string(field, ind)
             t0 = time.time()
