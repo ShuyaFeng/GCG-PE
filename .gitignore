@@ -1,0 +1,21 @@
+# runs / outputs
+runs/
+*.jsonl
+!data/memorized_sequences.json
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.ipynb_checkpoints/
+
+# caches / models
+.cache/
+*.pt
+*.bin
+*.safetensors
+
+# os
+.DS_Store
