@@ -38,9 +38,18 @@ huggingface-cli login             # only needed for Llama-2-7B access
 # 1) Smoke test first (minutes, one small model, offline) — verifies everything:
 python run.py --config configs/smoke.yaml
 
-# 2) Full run (single A100/H100 80GB; ~1000 GPU-hours, resumable):
+# 2a) Medium "first-results" run (a few GPU-hours; keeps every core finding):
+python run.py --config configs/full_fast.yaml
+
+# 2b) Full camera-ready run (single A100/H100 80GB; ~1000 GPU-hours, resumable):
 python run.py --config configs/full.yaml
 ```
+
+**Three configs**: `smoke` (verify only) → `full_fast` (3 models, 30 individuals,
+3 fields, 1 seed, GCG 250 steps — gets the 2x gap, frequency threshold,
+transfer, convergence, analysis, validation in a few GPU-h) → `full`
+(camera-ready: 5 models, 100 individuals, 6 fields, 3 seeds, GCG 500 steps).
+On SLURM: `sbatch scripts/cheaha_run.sbatch configs/full_fast.yaml`.
 The full run **downloads the real public corpus automatically** (Wikipedia /
 PG-19 / arXiv via HuggingFace `datasets`, streamed + cached to
 `runs/full/data/cache/`). Any source that fails to download is skipped; if the
