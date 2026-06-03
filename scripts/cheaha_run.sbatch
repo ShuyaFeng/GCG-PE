@@ -15,15 +15,25 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=12:00:00                   # bump toward the partition max if allowed
+#SBATCH --signal=B:TERM@180               # warn the script 180s before walltime kill
 #SBATCH --output=logs/gcgpe_%j.out
 #SBATCH --error=logs/gcgpe_%j.out
 ## #SBATCH --account=YOUR_ALLOCATION       # uncomment if Cheaha requires an account
 
-set -euo pipefail
+set -uo pipefail
 mkdir -p logs
 cd "$SLURM_SUBMIT_DIR"
 
 CONFIG="${1:-configs/full.yaml}"
+
+# If walltime is about to expire, SLURM sends TERM to this shell; resubmit to
+# continue (extraction is resumable, so the next job skips finished targets).
+resubmit_on_term() {
+  echo "[$(date)] walltime signal -> resubmitting to continue"
+  sbatch "$0" "${CONFIG}"
+  exit 0
+}
+trap resubmit_on_term TERM
 
 # CUDA: the pip torch wheel bundles its own CUDA runtime, so a compatible driver
 # (present on GPU nodes) is enough. Load a module only if you build against system CUDA.
@@ -36,17 +46,18 @@ export TOKENIZERS_PARALLELISM=false
 echo "[$(date)] host=$(hostname) gpu=${CUDA_VISIBLE_DEVICES:-?} config=${CONFIG}"
 nvidia-smi || true
 
-python run.py --config "${CONFIG}"
+# Run in background + wait, so the TERM trap can fire during the long run.
+python run.py --config "${CONFIG}" &
+PYPID=$!
+wait "${PYPID}"
+STATUS=$?
 
-# ----------------------------------------------------------------------------
-# Optional auto-chaining: if the full run is not finished, resubmit to continue.
-# Heuristic: stop chaining once the tables exist. Comment out if you prefer
-# to resubmit manually.
-# ----------------------------------------------------------------------------
-EXP_DIR=$(python -c "import yaml,sys;print(yaml.safe_load(open('${CONFIG}'))['output_dir'])")
-if [ ! -f "${EXP_DIR}/tables/tab_main_results.tex" ]; then
-  echo "[$(date)] run incomplete -> resubmitting to continue (resumable)"
+# Clean finish: only resubmit if the run errored before producing tables
+# (e.g. a transient failure); otherwise stop the chain.
+EXP_DIR=$(python -c "import yaml;print(yaml.safe_load(open('${CONFIG}'))['output_dir'])")
+if [ "${STATUS}" -ne 0 ] && [ ! -f "${EXP_DIR}/tables/tab_main_results.tex" ]; then
+  echo "[$(date)] exited ${STATUS} without tables -> resubmitting (resumable)"
   sbatch "$0" "${CONFIG}"
 else
-  echo "[$(date)] tables present -> done, not resubmitting"
+  echo "[$(date)] done (status=${STATUS}); not resubmitting"
 fi
