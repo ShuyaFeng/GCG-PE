@@ -226,8 +226,15 @@ def validate(df, strict: bool = True) -> Dict[str, Any]:
         # arms, otherwise pooled denominators are not comparable.
         n_per = df.groupby(["target_membership"])["person_id"].nunique().to_dict()
         report["persons_per_arm"] = n_per
-        report["targets_per_arm"] = df.groupby("target_membership").apply(
-            lambda d: d.groupby(["person_id", "field"]).ngroups).to_dict()
+        # Counted without groupby().apply(), which warns about operating on the
+        # grouping columns on pandas >= 2.2 and is noisy in a cluster log.
+        report["targets_per_arm"] = (
+            df[["target_membership", "person_id", "field"]]
+            .drop_duplicates()
+            .groupby("target_membership")
+            .size()
+            .to_dict()
+        )
 
     if strict and report["errors"]:
         raise ValueError("log validation failed:\n  " +
@@ -235,14 +242,45 @@ def validate(df, strict: bool = True) -> Dict[str, Any]:
     return report
 
 
-def main() -> None:
+def main() -> int:
+    """Validate a log and report cleanly.
+
+    Returns a shell exit status so a batch script can branch on it: 0 when the
+    required schema is satisfied, 2 when it is not. A missing column is an
+    ordinary outcome when adapting an older log, not a crash, so it is reported
+    rather than raised.
+    """
     import argparse
     ap = argparse.ArgumentParser(description="validate a per-attempt log")
     ap.add_argument("log")
     ap.add_argument("--no-strict", action="store_true")
     a = ap.parse_args()
-    df = load(a.log)
-    rep = validate(df, strict=not a.no_strict)
+
+    try:
+        df = load(a.log)
+    except Exception as exc:                       # unreadable / wrong format
+        print(f"ERROR: could not read {a.log}: {exc}")
+        return 2
+
+    try:
+        rep = validate(df, strict=not a.no_strict)
+    except ValueError as exc:                      # strict mode rejects the log
+        print(str(exc))
+        print()
+        print(f"columns present ({len(df.columns)}): {', '.join(map(str, df.columns))}")
+        missing = [c for c in REQUIRED if c not in df.columns]
+        if missing:
+            print(f"columns REQUIRED but absent ({len(missing)}): {', '.join(missing)}")
+            print()
+            print("Old-harness column names map as follows; supply the rest:")
+            for old, new in (("model", "model_name"), ("individual_id", "person_id"),
+                            ("frequency", "train_frequency"), ("method", "probe"),
+                            ("hit", "exact_match"), ("output", "generation"),
+                            ("best_prompt", "prompt_text")):
+                if new in missing:
+                    print(f"  {old:14s} -> {new}")
+        return 2
+
     print(f"rows: {rep['n_rows']}")
     for k in ("persons_per_arm", "targets_per_arm"):
         if k in rep:
@@ -251,9 +289,11 @@ def main() -> None:
         print("ERROR:", e)
     for w in rep["warnings"]:
         print("warn :", w)
-    if not rep["errors"]:
-        print("required schema OK")
+    if rep["errors"]:
+        return 2
+    print("required schema OK")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
