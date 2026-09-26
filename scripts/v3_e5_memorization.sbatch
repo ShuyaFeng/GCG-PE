@@ -14,15 +14,13 @@
 # Roughly 400 forward passes for 100 targets on two checkpoints.
 #
 # Submit:
-#   sbatch scripts/v3_e5_memorization.sbatch <finetuned_ckpt> <individuals.json> [controls.json]
+#   sbatch scripts/v3_e5_memorization.sbatch
 #
-# Example:
-#   sbatch scripts/v3_e5_memorization.sbatch \
-#       runs/full_fast/models/gpt2-seed0 runs/full_fast/data/individuals.json
-#
-# If you omit controls.json the job generates one first (matched, entropy known
-# exactly by construction, and drawn from identifier ranges that cannot collide
-# with real SSNs).
+# No arguments: the newest fine-tuned checkpoint and individuals.json under
+# runs/ are found automatically, and matched controls are generated if none
+# exist (entropy known exactly by construction, identifier ranges that cannot
+# collide with real SSNs). Override any of them by exporting first:
+#   V3_CKPT=... V3_INDIV=... V3_CONTROLS=... sbatch scripts/v3_e5_memorization.sbatch
 #
 # HOW TO READ THE RESULT
 #   true-prefix greedy hit rate HIGH  -> the premise holds; cite it as measured
@@ -44,17 +42,27 @@
 ## #SBATCH --account=YOUR_ALLOCATION
 
 set -uo pipefail
+cd "${SLURM_SUBMIT_DIR:-$(dirname "$0")/..}"
 mkdir -p logs runs/v3
-cd "$SLURM_SUBMIT_DIR"
 
-CKPT="${1:?usage: sbatch scripts/v3_e5_memorization.sbatch <finetuned_ckpt> <individuals.json> [controls.json]}"
-INDIV="${2:?need the individuals.json that was used to build the fine-tuning corpus}"
-CONTROLS="${3:-runs/v3/controls.json}"
-BASE_MODEL="${BASE_MODEL:-gpt2}"
+source scripts/v3_locate.sh
+CKPT="${V3_CKPT:-}"
+INDIV="${V3_INDIV:-}"
+CONTROLS="${V3_CONTROLS}"
+BASE_MODEL="${V3_BASE}"
 
-for f in "${CKPT}" "${INDIV}"; do
-  if [ ! -e "$f" ]; then echo "ERROR: no such path: $f"; exit 2; fi
-done
+v3_report
+echo
+if [ -z "${CKPT}" ] || [ ! -e "${CKPT}" ]; then
+  echo "ERROR: no fine-tuned checkpoint found under runs/*/models/."
+  echo "Point at one explicitly:  V3_CKPT=path/to/ckpt sbatch $0"
+  exit 2
+fi
+if [ -z "${INDIV}" ] || [ ! -f "${INDIV}" ]; then
+  echo "ERROR: no individuals.json found under runs/."
+  echo "Point at one explicitly:  V3_INDIV=path/to/individuals.json sbatch $0"
+  exit 2
+fi
 
 source .venv/bin/activate
 export HF_HOME="${HF_HOME:-$PWD/.hf_cache}"

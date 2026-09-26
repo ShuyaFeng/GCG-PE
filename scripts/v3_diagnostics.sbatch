@@ -7,11 +7,13 @@
 # rather than of forcing, and a reviewer will ask. This answers it.
 #
 # Submit:
-#   sbatch scripts/v3_diagnostics.sbatch <path/to/attempts.jsonl>
+#   sbatch scripts/v3_diagnostics.sbatch
 #
-# Optionally restrict to one analysis:
-#   sbatch scripts/v3_diagnostics.sbatch <log> copy
-#   (choices: copy,acr,seed,field,feasibility,twobytwo,scoring)
+# No arguments: the newest attempt log under runs/ is found automatically.
+# To pick a different one, or a single analysis:
+#   V3_LOG=runs/x/attempts.jsonl sbatch scripts/v3_diagnostics.sbatch
+#   V3_ONLY=copy sbatch scripts/v3_diagnostics.sbatch
+#   (V3_ONLY choices: copy,acr,seed,field,feasibility,twobytwo,scoring)
 #
 # IMPORTANT, READ BEFORE SUBMITTING
 # ---------------------------------
@@ -51,14 +53,19 @@
 ## #SBATCH --account=YOUR_ALLOCATION
 
 set -uo pipefail
+cd "${SLURM_SUBMIT_DIR:-$(dirname "$0")/..}"
 mkdir -p logs runs/v3
-cd "$SLURM_SUBMIT_DIR"
 
-LOG="${1:?usage: sbatch scripts/v3_diagnostics.sbatch <attempts.jsonl> [only]}"
-ONLY="${2:-}"
+source scripts/v3_locate.sh
+LOG="${V3_LOG:-}"
+ONLY="${V3_ONLY:-}"
 
-if [ ! -f "${LOG}" ]; then
-  echo "ERROR: no such log: ${LOG}"; exit 2
+v3_report
+echo
+if [ -z "${LOG}" ] || [ ! -f "${LOG}" ]; then
+  echo "ERROR: no per-attempt log found under runs/."
+  echo "Point at one explicitly:  V3_LOG=path/to/attempts.jsonl sbatch $0"
+  exit 2
 fi
 
 source .venv/bin/activate
