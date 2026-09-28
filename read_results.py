@@ -143,12 +143,16 @@ if e5:
     def fmt(x, w=5, p=1, suffix=""):
         return f"{x*100:{w}.{p}f}{suffix}" if isinstance(x, (int, float)) else f"{'n/a':>{w}}"
 
-    arms = {}
-    for arm, v in summary.items():
-        if not isinstance(v, dict):
+    # The summary mixes two kinds of entry: one per arm, and scalar diagnostics
+    # such as the loss-based AUC. Only the former have a per-arm hit rate.
+    arms, metrics = {}, {}
+    for key, v in summary.items():
+        if isinstance(v, dict) and "trueprefix_greedy_hit_rate_ft" in v:
+            arms[key] = v
+        else:
+            metrics[key] = v
             continue
         tp = v.get("trueprefix_greedy_hit_rate_ft")
-        arms[arm] = v
         nll_tp = v.get("median_nll_bits_trueprefix_ft")
         nll_nu = v.get("median_nll_bits_neutral_ft")
         print(f"  {str(arm):<8} n={str(v.get('n','?')):<5} "
@@ -212,6 +216,25 @@ if e5:
             Only one arm reported a usable rate (best {100*worst:.0f}%). Send me the
             raw summary block and I will read it.
             """)
+
+    if metrics:
+        auc = metrics.get("loss_based_auc_trueprefix")
+        tpr = metrics.get("loss_based_tpr_at_fpr")
+        print()
+        print("  LOSS-BASED MEMBERSHIP SIGNAL (no optimization at all):")
+        print(f"    AUC of the true-prefix target loss : {auc}")
+        print(f"    TPR at 1% FPR                      : {tpr}")
+        print("    the paper's OPTIMIZED score AUC    : 0.45-0.57, intervals covering 0.5")
+        verdict("""
+            This is the quantitative form of the paper's sharpened thesis. A plain
+            likelihood test on the target under its own training prefix separates
+            the arms; the optimized attack score does not. Report both AUCs side by
+            side: the audit's own instrument is the one that loses the signal.
+            If the AUC here is near 1.0 while the optimized AUC sits at chance,
+            that contrast belongs in the abstract.
+            """)
+        if "interpretation" in metrics:
+            print(f"  (script note: {metrics['interpretation']})")
 
     dk = e5.get("delta_k")
     if dk:
