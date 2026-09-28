@@ -138,41 +138,79 @@ if e5:
     summary = e5.get("summary", {})
     if not summary:
         print("  e5_bits.json has no summary block; the run may have died early.")
-    rates = []
-    for field, v in summary.items():
-        tp = v.get("trueprefix_greedy_hit_rate_ft")
-        rates.append(tp)
-        print(f"  {field:<6} n={v.get('n','?'):<4} "
-              f"true-prefix greedy hit {100*tp:5.1f}%   "
-              f"NLL true-prefix {v.get('median_nll_bits_trueprefix_ft', float('nan')):6.1f} bits   "
-              f"NLL neutral {v.get('median_nll_bits_neutral_ft', float('nan')):7.1f} bits")
-    rates = [r for r in rates if r is not None]
-    worst = max(rates) if rates else 0.0
+    # summary is keyed by arm (trained/control), and a key can carry None when a
+    # cell had nothing to score, so every value is guarded before arithmetic.
+    def fmt(x, w=5, p=1, suffix=""):
+        return f"{x*100:{w}.{p}f}{suffix}" if isinstance(x, (int, float)) else f"{'n/a':>{w}}"
 
-    if worst >= 0.5:
-        verdict(f"""
-            The premise HOLDS: the true training prefix recovers up to
-            {100*worst:.0f}% of trained targets by greedy decoding alone.
-            This is good news and it STRENGTHENS the paper.
-            Edit: Sec. 6.1 currently says "we report no per-record verification of
-            verbatim retention". Replace that with the measured rate, and drop the
-            hedge. The NLL gap between the two columns is also a reportable
-            bits-supplied decomposition.
-            """)
-    elif worst >= 0.1:
-        verdict(f"""
-            PARTIAL: {100*worst:.0f}% recovery from the true prefix. Report it as
-            measured, keep the hedge, and say that retention is verbatim for a
-            minority of records. No reframing needed.
-            """)
+    arms = {}
+    for arm, v in summary.items():
+        if not isinstance(v, dict):
+            continue
+        tp = v.get("trueprefix_greedy_hit_rate_ft")
+        arms[arm] = v
+        nll_tp = v.get("median_nll_bits_trueprefix_ft")
+        nll_nu = v.get("median_nll_bits_neutral_ft")
+        print(f"  {str(arm):<8} n={str(v.get('n','?')):<5} "
+              f"true-prefix greedy hit {fmt(tp)}%   "
+              f"NLL true-prefix {nll_tp if isinstance(nll_tp,(int,float)) else float('nan'):6.1f} bits   "
+              f"NLL neutral {nll_nu if isinstance(nll_nu,(int,float)) else float('nan'):7.1f} bits")
+
+    tr = arms.get("trained", {})
+    ct = arms.get("control", {})
+    tp_tr = tr.get("trueprefix_greedy_hit_rate_ft")
+    tp_ct = ct.get("trueprefix_greedy_hit_rate_ft")
+
+    if isinstance(tp_tr, (int, float)) and isinstance(tp_ct, (int, float)):
+        print()
+        print(f"  SEPARATION by the non-optimized true-prefix probe: "
+              f"{100*tp_tr:.1f}% trained vs {100*tp_ct:.1f}% control "
+              f"= {100*(tp_tr-tp_ct):+.1f} points")
+        print(f"  For comparison, the OPTIMIZED probe in the paper: "
+              f"52.0% vs 52.0% = +0.0 points")
+        nll_tr = tr.get("median_nll_bits_trueprefix_ft")
+        nll_ct = ct.get("median_nll_bits_trueprefix_ft")
+        if isinstance(nll_tr, (int, float)) and isinstance(nll_ct, (int, float)):
+            print(f"  median target NLL under the true prefix: "
+                  f"{nll_tr:.1f} bits trained vs {nll_ct:.1f} bits control "
+                  f"= a {nll_ct-nll_tr:.0f}-bit gap")
+
+        if tp_tr - tp_ct > 0.2:
+            verdict(f"""
+                THIS IS THE STRONGEST RESULT IN THE PAPER, and it is new.
+                A plain, non-optimized, identifier-conditioned probe SEPARATES the
+                two arms: {100*tp_tr:.1f}% of trained targets versus {100*tp_ct:.1f}% of
+                controls. The optimized probe, at the same targets, separates them
+                not at all (52% versus 52%).
+                Two things follow, and both strengthen the paper:
+                (1) The memorization premise is now measured, not assumed. Section 6.1
+                    no longer needs the soft prompt, which recovers 100% of both arms
+                    and therefore says nothing about attribution.
+                (2) The thesis sharpens. It is not merely that an optimized audit is
+                    uncalibrated; optimization DESTROYS a membership signal that a
+                    likelihood test retains. That is a stronger and more surprising
+                    claim, and this measurement supports it directly.
+                """)
+        elif tp_tr - tp_ct > 0.05:
+            verdict(f"""
+                The true-prefix probe separates the arms by
+                {100*(tp_tr-tp_ct):.0f} points where the optimized probe separates them
+                by zero. Report it: the memorization premise becomes measured rather
+                than assumed, and the contrast with the optimized probe is the point.
+                """)
+        else:
+            verdict("""
+                No arm separation even from the true training prefix. The paper's
+                current hedged wording already survives this; report the numbers and
+                keep the hedge.
+                """)
     else:
+        rates = [v.get("trueprefix_greedy_hit_rate_ft") for v in arms.values()]
+        rates = [r for r in rates if isinstance(r, (int, float))]
+        worst = max(rates) if rates else 0.0
         verdict(f"""
-            The premise does NOT hold as stated: only {100*worst:.0f}% of trained
-            targets are recovered from their own training prefix.
-            That is itself a finding, and the paper's current wording already
-            survives it, so nothing is broken. Worth doing: state this 0 as a
-            result with one verbatim prompt/generation example, and let the framing
-            be "the audit reports forcing where little is verbatim-extractable".
+            Only one arm reported a usable rate (best {100*worst:.0f}%). Send me the
+            raw summary block and I will read it.
             """)
 
     dk = e5.get("delta_k")
