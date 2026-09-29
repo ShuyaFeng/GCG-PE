@@ -279,9 +279,23 @@ def counting_bound(k: int, vocab_size: int, h_inf_bits: float,
     return min(1.0, 2.0 ** expo)
 
 
-def k_vac(h_inf_bits: float, vocab_size: int) -> int:
-    """Prop. 2: the capacity above which no uniform-over-models bound < 1 exists."""
-    return math.ceil(h_inf_bits / math.log2(vocab_size))
+def k_vac(support: Optional[int], vocab_size: int) -> Optional[int]:
+    """Prop. 2: the capacity above which no uniform-over-models bound < 1 exists.
+
+    The threshold is where |V|^k first covers the SUPPORT, because the
+    construction needs an injection from supp(D_0) into V^k. It is not set by the
+    min-entropy: sum_t p(t) = 1 with every p(t) <= p_max gives
+    |supp| >= 1/p_max = 2^{H_inf}, with equality only for a uniform generator, so
+    2^{H_inf} is a LOWER bound on the support and using it here would understate
+    k_vac. For Faker email the two differ: log2|supp| = 21.97 gives k_vac = 2,
+    while H_inf = 13.81 would wrongly give 1.
+
+    Returns None when the support is not enumerable, since the threshold is then
+    not determined.
+    """
+    if not support:
+        return None
+    return math.ceil(math.log2(support) / math.log2(vocab_size))
 
 
 def blind_bound(q_prompts: int, h_inf_bits: float, m_s: int = 1) -> float:
@@ -367,7 +381,7 @@ def report(tokenizer_name: str = "gpt2", decode_len_L: int = 48,
                          (mult.m_s_rigorous, f"m_S={mult.m_s_rigorous}")):
             rows.append({
                 "field": e.field, "m_S": tag,
-                "k_vac": k_vac(e.h_inf_bits, vocab_size),
+                "k_vac": k_vac(e.support, vocab_size),
                 "counting_k1": counting_bound(1, vocab_size, e.h_inf_bits, m_s),
                 "counting_k2": counting_bound(2, vocab_size, e.h_inf_bits, m_s),
                 "blind_Q_restart": blind_bound(random_restart_q, e.h_inf_bits, m_s),
